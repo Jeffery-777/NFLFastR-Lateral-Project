@@ -1,0 +1,67 @@
+---
+title: "test out lateral yards"
+output: html_document
+---
+
+```{r}
+# load up
+library(tidyverse)
+
+
+# lower case might ruin everything.... well see
+laterals <- NFLFastR %>%
+  filter(str_detect(desc, "[Ll]ateral"))
+
+```
+
+# Make into separate yards gained
+```{r}
+
+part1 <- laterals %>%
+  mutate(row = row_number()) %>%
+  separate_rows(desc, sep = "\\.\\s") %>%
+  mutate(lat_player_name1 = str_match(desc, "to\\s?([A-Z]\\.\\w+)")[, 2], 
+         lat_player_name2 = str_match(desc, "([A-Z]\\.\\w+).*?(?:left|right|middle|scrambles)")[, 2],
+         lat_player_name = coalesce(lat_player_name1, lat_player_name2), 
+         lat_player_1_yards = str_match(desc, "(-?\\d+)\\syards?")[, 2], 
+         lat_player_2_yards = str_extract(desc, "no gain"), 
+         lat_player_2_yards = replace(lat_player_2_yards, 
+                                      lat_player_2_yards == 'no gain', 0), 
+         lat_yards = coalesce(lat_player_1_yards, lat_player_2_yards), 
+         Intercepted = str_match(desc, '([A-Z]\\.\\w+).*?INTERCEPTED by')[, 2],
+         Fumbles2 = str_match(desc, "([A-Z]\\.\\w+) FUMBLES")[, 2],
+         Fumbles3 = ifelse(grepl('FUMBLES', desc), lag(lat_player_name), NA),
+         Fumbles = coalesce(Fumbles2, Fumbles3),
+         Touchdown = str_match(desc, '([A-Z]\\.\\w+).*?TOUCHDOWN')[, 2]) %>%
+  select(game_id, posteam, defteam, desc, 
+         lat_player_name, lat_yards, posteam, defteam, 
+         Intercepted, Fumbles, Touchdown, row)
+
+
+
+end <- part1 %>%
+  group_by(row) %>%
+  mutate(desc = toString(desc), 
+         across(Intercepted:Touchdown, ~na.omit(.)[1])) %>%
+  mutate(col = row_number()) %>%
+  ungroup() %>%
+  select(-row) %>%
+  pivot_wider(names_from = col, values_from = c(lat_player_name, lat_yards)) %>%
+  mutate(Fum_Rec_Team1 = str_match(desc, "(?:RECOVERED|recovered) by (\\w+)-") [, 2],
+         Fum_Rec_Team2 = ifelse(str_detect(desc, "FUMBLES, and recovers |FUMBLES, ball out of bounds | FUMBLES, touched"), posteam, NA_character_),
+         Fum_Rec_Team = coalesce(Fum_Rec_Team1, Fum_Rec_Team2),
+         Fum_Rec_Yards1 = str_match(desc, "FUMBLES, .*?for (\\d+) yards|no gain") [, 2],
+         Fum_Rec_Yards2 = ifelse(is.na(Fum_Rec_Yards1), str_match(desc, "(?<=for ).*?(?= yard|no gain)"), NA_character_),
+         Fum_Rec_Yards = coalesce(Fum_Rec_Yards1, Fum_Rec_Yards2)) %>%  
+  select(game_id, desc, lat_int = Intercepted, lat_fumble = Fumbles, lat_fumble_recover = Fum_Rec_Team, lat_fumble_rec_yds = Fum_Rec_Yards, lat_touchdown = Touchdown, lat_player_name_1:lat_yards_16)
+  
+
+
+# join back to main issue - not sure why but the join ruins things. I only get two lat_player_1 after the join. this might be a super simple fix though IDK. 
+
+test2 <- NFLFastR %>% 
+  left_join(end, by = c("game_id", "desc"))
+
+
+```
+
